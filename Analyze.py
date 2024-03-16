@@ -1,4 +1,4 @@
-import CLI3
+import TinyCLI
 
 
 def current_habits():

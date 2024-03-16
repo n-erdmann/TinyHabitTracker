@@ -11,7 +11,7 @@ from DBActions import DBActions
 from Habit import Habit, HabitMaster, HabitLog
 
 
-class CLI3:
+class CLI:
     # TODO: option to return to submenu from any point?
     def __init__(self, dba=DBActions(), h=Habit(), hm=HabitMaster(), hl=HabitLog()):
         self.dba = dba

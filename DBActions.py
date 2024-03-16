@@ -11,7 +11,11 @@ class DBActions:
         pass
 
     @staticmethod
-    def fetchall_to_list(list_in: list):
+    def fetchall_to_list(list_in: list) -> list:
+        """This helper method converts the result of a fetchall from the database (list of tuples) to a python list
+        :param list_in: a list as it is returned using fetchall
+        :return: list with only relevant information
+        """
         return_list = []
         for item in list_in:
             return_list.append(item[0])
@@ -23,7 +27,7 @@ class DBActions:
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
 
-        # create table for master data: habit_master
+        # create table for primary data: habit_master
         cursor.execute("""CREATE TABLE IF NOT EXISTS habit_master (
             name TEXT NOT NULL,
             status INTEGER NOT NULL,
