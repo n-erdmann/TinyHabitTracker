@@ -26,15 +26,17 @@ class Habit:
         self.periodicity_range = ['daily', 'weekly', 'monthly', 'yearly']
         self.dba = dba
 
-    def get_active_habit_info(self, habit: str, info: bool = True, streaks: bool = True) -> list:
+    def get_active_habit_info(self, habit: str, date: date = datetime.date.today(), info: bool = True,
+                              streaks: bool = True) -> list:
         """reads habit master data and/or habit streak data for given habit
         returned lists can be chosen by specifying bool values for attributes info and streak
+        :param date: date that is used for checking active habit
         :param habit: habit name
         :param info: boolean flag to choose habit master data information
         :param streaks: boolean flag to choose streak data
         :return: one or two lists (habit_info, habit_streaks)"""
         if info:
-            habit_info = self.dba.get_active_habit_info(name=habit)
+            habit_info = self.dba.get_active_habit_info(name=habit, today=date)
 
         if streaks:
             habit_streaks = self.dba.get_active_habit_streak(name=habit)
@@ -117,7 +119,7 @@ class HabitMaster(Habit):
                                                           frequency, start, end, cur_per, cur_year, quantity, unit)
         return row_count, return_message
 
-    def delete(self, name: str) -> tuple:  # TODO: replace 3 values with 1?
+    def delete(self, name: str) -> tuple:
         """ call delete method
         :param name: name of the habit
         :return: tuple of 3 values
@@ -144,6 +146,21 @@ class HabitMaster(Habit):
         return_message = self.dba.edit_descr(name, descr)
         return return_message
 
+    def reschedule(self, name: str, description: str, periodicity: str, start: datetime.date, frequency: int, is_quan: int,
+                   quantity: float = '', unit: str = '') -> str :
+        # end the currently active habit
+        end = start - datetime.timedelta(days=1)
+        deactivation = self.deactivate(name=name, end=str(end))
+        if deactivation[0] == '1':
+            # create new record with new specification
+            row_count, return_message = self.dba.create_habit(name=name, status=1, description=description,
+                                                              is_quantifiable=is_quan,
+                                                              periodicity=periodicity, start=start, frequency=frequency,
+                                                              end=date.fromisoformat('2199-12-31'), quantity=quantity,
+                                                              unit=unit)
+            return return_message
+
+
 class HabitLog(Habit):
     def __init__(self, name: str = '', description: str = '', start: datetime.date = '', end: datetime.date = '',
                  status: int = '',
@@ -154,17 +171,17 @@ class HabitLog(Habit):
         self.log_date = log_date
 
     def set_streak(self, name: str, log_date: datetime.date) -> str:
-        """Calculates streak for given habit and log_date and saves it to database. \n
+        """Calculates streak for given habit and log_date and saves it to the database. \n
         If possible, streaks are calculated based on previous (existing) streak data. \n
-        But if this is not possible, i.e. if streaks were not entered in chronological order leading to a break
-        that is unjustified then streak data needs to be cleared calculated again from the start to correct this
+        But if this is not possible, i.e., if streaks were not entered in chronological order leading to a break
+        that is unjustified, then streak data needs to be cleared calculated again from the start to correct this.
         :param name: habit name
         :param log_date: date of logged completion
         :return: string with information about successful DB update"""
         streak = 0
-        # first, import information from habit master data, so we know which logic to use
+        # first, import information from habit primary data, so we know which logic to use
         # also import most current record with information from habit_streaks
-        habit_info, habit_streaks = self.get_active_habit_info(habit=name)
+        habit_info, habit_streaks = self.get_active_habit_info(habit=name, date=log_date)
         # is_quantifiable = habit_info[3]
         periodicity = habit_info[4]
         frequency = habit_info[5]
@@ -182,15 +199,6 @@ class HabitLog(Habit):
         valid_from = habit_streaks[3]
         log_year = str(log_date.year)
         max_log_date = datetime.date.fromisoformat(self.dba.get_latest_log_date(name=name))
-        # TODO: is this still needed?
-        try:
-            streak_date = datetime.date(int(habit_streaks[5][0:4]), int(habit_streaks[5][5:7]),
-                                        int(habit_streaks[5][8:10]))
-        except TypeError:
-            # streak_date = None
-            # that means we need the start date of the habit, can use valid_from from streaks table
-            streak_date = datetime.date(int(habit_streaks[3][0:4]), int(habit_streaks[3][5:7]),
-                                        int(habit_streaks[3][8:10]))
 
         # fill log period and previous ("last") period dynamically depending on periodicity:
         if periodicity == 'daily':
@@ -216,7 +224,8 @@ class HabitLog(Habit):
         # check for each new period (needs the least amount of data), check from start would be possible as well
         dba = DBActions()
         if log_per == cur_per and str(log_year) == cur_year and cur_per != streak_per and log_date >= max_log_date:
-            # still the same period and streak has not yet been achieved - check if logged entries match the habit
+            # first streak calculation
+            # it is still the same period and streak has not yet been achieved - check if logged entries match the habit
             # definition: how many completions were logged for this period?
             completion_count = dba.get_habit_completion_by_single_per(name=name, log_per=log_per)
             if completion_count >= frequency:

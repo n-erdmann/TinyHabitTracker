@@ -39,7 +39,7 @@ class DBActions:
             unit TEXT,
             start TEXT NOT NULL,
             end	TEXT DEFAULT '2199-12-31',
-            PRIMARY KEY (name, start, status))""")
+            PRIMARY KEY (name, start))""")
 
         # create table for tracking habits: habit_log
         cursor.execute("""CREATE TABLE IF NOT EXISTS habit_log (
@@ -72,6 +72,7 @@ class DBActions:
                     cur_per text not null,
                     cur_year text not null ,
                     streak_per text,
+                    status INTEGER NOT NULL DEFAULT 1 ,
                     foreign key (name) REFERENCES habit_master(name))""")
 
         db.commit()
@@ -154,17 +155,14 @@ class DBActions:
             'periodicity', 'frequency', 'quantity', 'unit', 'start', 'end') 
             VALUES( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", parameter)
         rowcount = cursor.rowcount
+        db.commit()  # commit master data record
 
-        # create  initial record in streaks table
-        params_streak = (name, datetime.date.today(), start, end, 0, 0, cur_per, cur_year, 0)
-        cursor.execute("""INSERT INTO habit_streaks('name', 'changed_on', 'valid_from', 'valid_to',
-            'cur_streak', 'avg_quantity', 'cur_per', 'cur_year', 'streak_per')
-             values(?, ?, ?, ?, ?, ?, ?, ?, ?)""", params_streak)
-        rowcount = rowcount + cursor.rowcount
+        rowcount = rowcount + self.create_initial_streaks_entry(name=name, start=str(start), end=str(end),
+                                                                cur_per=cur_per, cur_year=cur_year)
 
-        # only commit if both records could be created!
+        # only return success message if both records have been created
         if rowcount == 2:
-            db.commit()
+            db.commit()  # commit initial streak record
             db.close()
             return_message = 'Records were created successfully'
 
@@ -174,7 +172,6 @@ class DBActions:
 
         return rowcount, return_message
 
-    # TODO: replace initial record creation in create method with this:
     def create_initial_streaks_entry(self, name: str, start: str, cur_per: str, cur_year: str,
                                      end: str = '2199-12-31') -> int:
         """(Re)Creates the initial streaks record either during creation of a new habit or in streaks calculation if
@@ -199,14 +196,14 @@ class DBActions:
         return rowcount
 
     def clear_streaks(self, name: str) -> int:
-        """clears all records of a given habit from habit_streaks table to recalculate streaks from the start
+        """clears all active records of a given habit from habit_streaks table to recalculate streaks from the start
         :param name: habit name
         :return: rowcount (int)"""
 
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
 
-        cursor.execute("""DELETE FROM habit_streaks WHERE name = """ + "'" + str(name) + "'")
+        cursor.execute("""DELETE FROM habit_streaks WHERE name = """ + "'" + str(name) + "' and status = 1")
         if cursor.rowcount > 0:
             db.commit()
         rowcount = cursor.rowcount
@@ -290,11 +287,11 @@ class DBActions:
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
 
-        sql = ("""UPDATE habit_master SET end = """ + "'" + str(end) + "'" + """ WHERE name = """ + "'" + str(name)
+        sql = ("""UPDATE habit_master SET status = 0, end = """ + "'" + str(end) + "'" + """ WHERE name = """ + "'" + str(name)
                + "'")
         cursor.execute(sql)
 
-        sql = ("""UPDATE habit_streaks SET valid_to = """ + "'" + str(end) + "'" + """ WHERE name = """ + "'" +
+        sql = ("""UPDATE habit_streaks SET status = 0, valid_to = """ + "'" + str(end) + "'" + """ WHERE name = """ + "'" +
                str(name) + "' AND valid_to = '2199-12-31'")
         cursor.execute(sql)
 
@@ -327,16 +324,25 @@ class DBActions:
 
         return row_count
 
-    def get_active_habits_list(self, today: datetime.date = datetime.date.today(), is_quan: int = '') -> tuple:
+    def get_active_habits_list(self, today: datetime.date = datetime.date.today(), is_quan_only: bool = False) -> tuple:
         """retrieves a list of existing active habits from master data, can be restricted to only quantifiable habits
         :param today: date for selecting active habits, default is today
-        :param is_quan: flag to indicate whether all or only quantifiable habits should be returned
+        :param is_quan_only: flag to indicate whether all or only quantifiable habits should be returned
         :return: tuple (list of habits, dict of habits with description)
         """
-        # TODO: Change is_quan to bool!
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
-        if is_quan == '':
+        if is_quan_only:
+            sql1 = ("SELECT   DISTINCT name "
+                    "  FROM   habit_master "
+                    " WHERE status = 1 AND start <= " + "'" + str(today) + "'" + " AND end >= " + "'" + str(today) + "'"
+                    + "AND is_quantifiable = 1 ORDER BY name")
+
+            sql2 = ("SELECT   DISTINCT name, description "
+                    "  FROM   habit_master "
+                    " WHERE status = 1 AND start <= " + "'" + str(today) + "'" + " AND end >= " + "'" + str(today) + "'"
+                    + "AND is_quantifiable = 1 ORDER BY name")
+        else:
             sql1 = ("SELECT   DISTINCT name "
                     "  FROM   habit_master "
                     " WHERE status = 1 AND start <= " + "'" + str(today) + "'" + " AND end >= " + "'" + str(today) + "'"
@@ -346,18 +352,9 @@ class DBActions:
                     "  FROM   habit_master "
                     " WHERE status = 1 AND start <= " + "'" + str(today) + "'" + " AND end >= " + "'" + str(today) + "'"
                     + " ORDER BY name")
-        elif is_quan == '1':
-            sql1 = ("SELECT   DISTINCT name "
-                    "  FROM   habit_master "
-                    " WHERE status = 1 AND start <= " + "'" + str(today) + "'" + " AND end >= " + "'" + str(today) + "'"
-                    + "AND is_quantifiable = " + str(is_quan) + " ORDER BY name")
 
-            sql2 = ("SELECT   DISTINCT name, description "
-                    "  FROM   habit_master "
-                    " WHERE status = 1 AND start <= " + "'" + str(today) + "'" + " AND end >= " + "'" + str(today) + "'"
-                    + "AND is_quantifiable = " + str(is_quan) + " ORDER BY name")
 
-        # fill habit list:
+        # fill habit_list:
         habit_list = self.fetchall_to_list(cursor.execute(sql1).fetchall())
 
         # fill dictionary:

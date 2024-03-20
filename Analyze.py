@@ -5,7 +5,7 @@ def current_habits():
     """
     Prints a list of all currently tracked habits on the screen
     """
-    dba = CLI3.DBActions()
+    dba = TinyCLI.DBActions()
     cur_habits = dba.get_active_habits_list()[1]
     print("These are your currently active habits: ")
     print("---------------------------------------")
@@ -20,7 +20,7 @@ def habits_by_periodicity(periodicity: str, current: bool = True):  # TODO: add 
     :param periodicity: the periodicity of choice
     :param current: True if only current habits are to be displayed, False for all habits
     """
-    dba = CLI3.DBActions()
+    dba = TinyCLI.DBActions()
     habits = dba.get_habits_by_periodicity(periodicity=periodicity, current=current)
     if current:
         print("These are your currently active habits with periodicity " + periodicity + ":")
@@ -32,7 +32,7 @@ def habits_by_periodicity(periodicity: str, current: bool = True):  # TODO: add 
 
 
 def longest_streak(name: str = '', current: bool = False):
-    dba = CLI3.DBActions()
+    dba = TinyCLI.DBActions()
     habit, streak, streak_date = dba.get_max_streak(name=name, current=current)
     if current:
         if name:
@@ -63,7 +63,7 @@ def overview_by_month(calmonth: str):
 def logs_by_habit(habit: str):
     """Give an overview of logged activity for a chosen habit depending on habit's periodicity"""
     # TODO: Separate output by quantifiable and binary habits
-    dba = CLI3.DBActions()
+    dba = TinyCLI.DBActions()
     logs_overview = dba.get_log_overview_by_habit_df(habit)
     import pandas as pd
     pd.set_option('display.max_columns', 10)
