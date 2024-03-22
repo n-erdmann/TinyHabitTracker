@@ -40,7 +40,6 @@ class CLI:
                           5: "Overview of a given habit",
                           6: "Overview by month",
                           7: "View logs by habit",
-                          # 8: "Explore data",
                           0: "Return to Main Menu"}
         self.sub_ana_l = ["List all currently tracked habits",
                           "Habits by periodicity",
@@ -49,7 +48,6 @@ class CLI:
                           "Overview of a given habit",
                           "Overview by month",
                           "View logs by habit",
-                          # 8: "Explore data",
                           "Return to Main Menu"]
 
     @staticmethod
@@ -532,14 +530,35 @@ class CLI:
         elif sub_selection == 5 or sub_selection == "Overview of a given habit":  # # TODO overview by habit
             pass
 
-        elif sub_selection == 6 or sub_selection == "Overview by month":  # # TODO overview by month
-            pass
+        elif sub_selection == 6 or sub_selection == "Overview by month":
+            try:
+                month = input("Please choose the month you want to analyze in format YYYY-MM: ")
+                check = datetime.date.fromisoformat(str(month + '-01'))
+            except ValueError:
+                print("The input is not a valid month of format YYYY-MM. Please try again!")
+                month = input("Please choose the month you want to analyze in format YYYY-MM: ")
+                check = datetime.date.fromisoformat(str(month + '-01'))
+            self.clear_screen()
+            Analyze.overview_by_month(calmonth=month)
+            input("\n Press enter to return to Analyze Habits submenu.")
+            # call submenu again = return to submenu after finishing
+            self.sub_analyze()
 
         elif sub_selection == 7 or sub_selection == "View logs by habit":  # logs overview
             # let user choose habit
             habit = self.choose_habit()
-            Analyze.logs_by_habit(habit)
+            try:
+                limit = int(input("Specify how many logs you would like to see (optional): "))
+            except ValueError:
+                print("Invalid input.\n Please try again or leave blank to continue.")
+                limit = int(input("Specify how many logs you would like to see (optional): "))
+            if limit == '' or limit == 0:
+                Analyze.logs_by_habit(habit)
+            else:
+                Analyze.logs_by_habit(habit=habit,limit=limit)
+
             input("\n Press enter to return to Analyze Habits submenu.")
+
             # call submenu again = return to submenu after finishing
             self.sub_analyze()
 

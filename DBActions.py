@@ -1,6 +1,8 @@
 import sqlite3
 import datetime
 import pandas as pd
+
+
 # import pyarrow
 
 
@@ -49,7 +51,7 @@ class DBActions:
             completed INTEGER NOT NULL DEFAULT 1,
             quantity REAL,
             partial REAL,
-            weekday INTEGER NOT NULL,
+            weekday TEXT NOT NULL,
             week TEXT not null ,
             calweek TEXT NOT NULL,
             month INTEGER NOT NULL ,
@@ -57,6 +59,8 @@ class DBActions:
             year INTEGER NOT NULL,
             calyear TEXT NOT NULL,
             log_per TEXT NOT NULL,
+            created_on TEXT, 
+            cur_streak INTEGER,
             foreign key (name) REFERENCES habit_master(name))""")
 
         # create table for logging streaks: habit_streaks
@@ -79,7 +83,27 @@ class DBActions:
         row_count = cursor.execute("""SELECT count(name) FROM sqlite_master WHERE type='table';""").fetchone()[0]
         cursor.close()
 
+        if row_count == 3:  # all tables created
+            self.create_view()
         return row_count
+
+    def create_view(self):
+        """creates view based on DB tables for Analytics module"""
+        sql = ("CREATE VIEW IF NOT EXISTS habit_log_overview AS select prim.name as habit, "
+               "prim.description as description, prim.periodicity as periodicity,"
+               "prim.frequency as frequency, prim.quantity as target_quantity, hl.quantity as completed_quantity,"
+               "prim.unit as unit, hl.date as log_date,"
+               "hl.weekday, hl.log_per as period, hl.calmonth as month, hl.calweek as week, hl.calyear as year, "
+               "hl.completed, hl.partial as partial_completion, hl.cur_streak "
+               "from main.habit_master as prim"
+               "left join main.habit_log hl on "
+               "prim.name = hl.name and prim.start <= hl.date and prim.end >= hl.date")
+
+        db = sqlite3.connect(self.db_con)
+        cursor = db.cursor()
+        cursor.execute(sql)
+        db.commit()
+        cursor.close()
 
     def delete_from_db(self, name: str) -> tuple:
         """deletes habits completely from all 3 DB tables
@@ -148,7 +172,7 @@ class DBActions:
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
 
-        # create master data record
+        # create primary data record
         parameter = (name, status, description, is_quantifiable, periodicity, frequency, quantity, unit,
                      start, end)
         cursor.execute("""INSERT INTO habit_master('name', 'status', 'description', 'is_quantifiable',
@@ -210,8 +234,8 @@ class DBActions:
         return rowcount
 
     def insert_log(self, name: str, date: datetime.date, completed: int, quantity: float, partial: float, weekday: int,
-                   week: int, calweek: str, month: int, calmonth: str, year: int, calyear: str, log_per: str) -> str:
-        """inserts new records into habit_log table
+                   week: int, calweek: str, month: int, calmonth: str, year: int, calyear: str, log_per: str) -> tuple:
+        """Inserts new records into habit_log table.
         :param name: habit name
         :param date: log date of completion
         :param completed: whether a habit was completed, always 1 for binary habits, only 1 for quantifiable habits if
@@ -226,7 +250,7 @@ class DBActions:
         :param year: year of log date (int)
         :param calyear: year of log date (str)
         :param log_per: relevant period of log date depending on periodicity
-        :return: a string with a return message about creation of DB records
+        :return: tuple (string with a return message about creation of DB records, row of inserted record)
         """
 
         self.create_tables()
@@ -234,16 +258,28 @@ class DBActions:
         cursor = db.cursor()
 
         parameter = (name, date, completed, quantity, partial, weekday, week, calweek, month, calmonth, year, calyear,
-                     log_per)
+                     log_per, str(datetime.date.today()), '')
         cursor.execute("""INSERT INTO habit_log('name', 'date', 'completed', 'quantity', 'partial', 'weekday', 
-                    'week', 'calweek', 'month', 'calmonth', 'year', 'calyear', 'log_per') 
-                    VALUES( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", parameter)
+                    'week', 'calweek', 'month', 'calmonth', 'year', 'calyear', 'log_per', 'created_on', 'cur_streak') 
+                    VALUES( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", parameter)
         if cursor.rowcount > 0:
             db.commit()
             return_message = str(cursor.rowcount) + ' log record was created successfully'
-            return return_message
+            rowid = cursor.lastrowid
+            cursor.close()
+            return return_message, rowid
         else:
-            return 'log record could not be created.'
+            cursor.close()
+            return 'log record could not be created.', 0
+
+    def update_log(self, name, rowid, streak):
+        """Updates the cur_streak value for the habit being currently logged"""
+        db = sqlite3.connect(self.db_con)
+        cursor = db.cursor()
+        cursor.execute("UPDATE habit_log SET cur_streak = " + str(streak) +
+                       " WHERE name =  " + "'" + str(name) + "'" + " and rowid = " + "'" + str(rowid) + "'")
+        db.commit()
+        cursor.close()
 
     def edit_descr(self, name: str, descr: str) -> str:
         """updates a habit's description
@@ -287,11 +323,13 @@ class DBActions:
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
 
-        sql = ("""UPDATE habit_master SET status = 0, end = """ + "'" + str(end) + "'" + """ WHERE name = """ + "'" + str(name)
+        sql = ("""UPDATE habit_master SET status = 0, end = """ + "'" + str(
+            end) + "'" + """ WHERE name = """ + "'" + str(name)
                + "'")
         cursor.execute(sql)
 
-        sql = ("""UPDATE habit_streaks SET status = 0, valid_to = """ + "'" + str(end) + "'" + """ WHERE name = """ + "'" +
+        sql = ("""UPDATE habit_streaks SET status = 0, valid_to = """ + "'" + str(
+            end) + "'" + """ WHERE name = """ + "'" +
                str(name) + "' AND valid_to = '2199-12-31'")
         cursor.execute(sql)
 
@@ -304,7 +342,7 @@ class DBActions:
         return return_message
 
     def delete_tables(self):
-        """deletes db tables;
+        """deletes DB tables and DB view;
         db_con is habit_db by default but can be set to test_db when this method is called by test class"""
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
@@ -318,6 +356,9 @@ class DBActions:
         # drop table for logging streaks: habit_streaks
         cursor.execute("""DROP TABLE IF EXISTS habit_streaks;""")
 
+        # drop view for analysis
+        cursor.execute("""DROP VIEW IF EXISTS habit_log_overview;""")
+
         db.commit()
         row_count = cursor.execute("""SELECT count(name) FROM sqlite_master WHERE type='table';""").fetchone()[0]
         cursor.close()
@@ -325,8 +366,8 @@ class DBActions:
         return row_count
 
     def get_active_habits_list(self, today: datetime.date = datetime.date.today(), is_quan_only: bool = False) -> tuple:
-        """retrieves a list of existing active habits from master data, can be restricted to only quantifiable habits
-        :param today: date for selecting active habits, default is today
+        """Retrieves a list of existing active habits from primary data, can be restricted to only quantifiable habits.
+        :param today: Date for selecting active habits, default is today
         :param is_quan_only: flag to indicate whether all or only quantifiable habits should be returned
         :return: tuple (list of habits, dict of habits with description)
         """
@@ -353,7 +394,6 @@ class DBActions:
                     " WHERE status = 1 AND start <= " + "'" + str(today) + "'" + " AND end >= " + "'" + str(today) + "'"
                     + " ORDER BY name")
 
-
         # fill habit_list:
         habit_list = self.fetchall_to_list(cursor.execute(sql1).fetchall())
 
@@ -374,7 +414,7 @@ class DBActions:
         """returns count of habit completion in a single log period
         :param name: habit name
         :param log_per: relevant period for logging completions (day, week, month or year)
-        :return: sum of logged completions of the habit (int)
+        :return: sum of logged completions for the habit (int)
         """
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
@@ -414,8 +454,8 @@ class DBActions:
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
         sql = ("""SELECT SUM(completed) as count, (calyear || '-' || log_per) as per, log_per, calyear, 
-        MAX(date) as date FROM habit_log where name = """ + "'" + str(name) + "'" """AND date <= """ + "'" +
-               str(log_date) + "' AND completed = 1 group by per")
+        MAX(date) as date, id, cur_streak FROM habit_log where name = """ + "'" + str(name) + "'" """AND date <= """ +
+               "'" + str(log_date) + "' AND completed = 1 group by per")
         habit_log = cursor.execute(sql).fetchall()
         # habit_log_df = pd.read_sql_query(sql, db_con)
         query = cursor.execute(sql)
@@ -439,14 +479,14 @@ class DBActions:
     def update_streak_table(self, name: str, new_streak: int, new_date: str, val_from: str, cur_per: str, cur_year: str,
                             streak_per: str, today: datetime.date = datetime.date.today(), valid_to: str = '') -> int:
         """
-        Updates habits_streak table with new values for current streak, including new date values
-        :param name: habit name
-        :param new_streak: new streak value
+        Updates habits_streak table with new values for current streak, including new date values.
+        :param name: Habit name.
+        :param new_streak: New streak value
         :param new_date: new streak date
         :param val_from: start of the current streak
         :param cur_per: currently evaluated period
         :param cur_year: year of the currently evaluated period
-        :param streak_per: period in which the streak was last updated
+        :param streak_per: The period in which the streak was last updated
         :param today: current date
         :param valid_to: end date of the current streak
         :return: rowcount (int)
@@ -579,33 +619,102 @@ class DBActions:
         row_count = cursor.execute(sql).fetchone()[0]
         return row_count
 
+    def get_quan(self, name: str, date_from: datetime.date, date_to: datetime.date) -> bool:
+        """Returns True if habit was defined as quantifiable in the given date range, else False"""
+        sql = ("SELECT MAX(is_quantifiable) as is_quan FROM habit_master where name = " + "'" + str(name) + "'" +
+               " and end >= " + "'" + str(date_from) + "'")
+
+        db = sqlite3.connect(self.db_con)
+        cursor = db.cursor()
+        is_quan = cursor.execute(sql).fetchone()[0]
+
+        if is_quan == 0:
+            return False
+        else:
+            return True
+
     def get_log_overview_by_habit_df(self, name: str, limit: int = 35) -> object:
         """returns overview of one habit's logs and streaks as dataframe"""
         period = self.get_periodicity(name)
 
         if period == 'daily':
-            sql = ("SELECT log_date as 'log date', sum(completed) as completed, avg(quantity) as 'avg quantity',"
-                   "(avg(partial_completion)*100 ||'%') as 'avg completion (%)', weekday, week, month "
-                   "FROM habit_log_overview WHERE name = " + "'" + str(name) +
-                   "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
-        elif period == 'weekly' or period == 'monthly':
-            sql = ("SELECT period, log_date as 'log date', sum(completed) as completed, avg(quantity) as 'avg quantity',"
-                   "(avg(partial_completion)*100 ||'%') as 'avg completion (%)', weekday, week, month "
-                   "FROM habit_log_overview WHERE name = " + "'" + str(name) +
-                   "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+            date_from = datetime.date.today() - datetime.timedelta(days=35)
+            is_quan = self.get_quan(name, date_from=date_from, date_to=datetime.date.today())
+            if is_quan:
+                sql = ("SELECT log_date as 'log date', sum(completed) as completed, "
+                       "avg(completed_quantity) as 'avg quantity',"
+                       "(avg(partial_completion)*100 ||'%') as 'avg completion (%)', weekday, week, month, "
+                       "cur_streak as streak "
+                       "FROM habit_log_overview WHERE habit = " + "'" + str(name) +
+                       "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+            else:
+                sql = ("SELECT log_date as 'log date', sum(completed) as completed, weekday, week, month, "
+                       "cur_streak as streak "
+                       "FROM habit_log_overview WHERE habit = " + "'" + str(name) +
+                       "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+
+        elif period == 'weekly':
+            date_from = datetime.date.today() - datetime.timedelta(weeks=35)
+            is_quan = self.get_quan(name, date_from=date_from, date_to=datetime.date.today())
+            if is_quan:
+                sql = ("SELECT period, log_date as 'log date', sum(completed) as completed, "
+                       "avg(completed_quantity) as 'avg quantity',"
+                       "(avg(partial_completion)*100 ||'%') as 'avg completion (%)', weekday, week, month, "
+                       "cur_streak as streak "
+                       "FROM habit_log_overview WHERE habit = " + "'" + str(name) +
+                       "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+            else:
+                sql = ("SELECT period, log_date as 'log date', weekday, week, month, cur_streak as streak "
+                       "FROM habit_log_overview WHERE habit = " + "'" + str(name) +
+                       "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+
+        elif period == 'monthly':
+            date_from = datetime.date.today() - datetime.timedelta(weeks=140)
+            is_quan = self.get_quan(name, date_from=date_from, date_to=datetime.date.today())
+            if is_quan:
+                sql = ("SELECT period, log_date as 'log date', sum(completed) as completed, "
+                       "avg(completed_quantity) as 'avg quantity',"
+                       "(avg(partial_completion)*100 ||'%') as 'avg completion (%)', weekday, week, month, "
+                       "cur_streak as streak "
+                       "FROM habit_log_overview WHERE habit = " + "'" + str(name) +
+                       "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+            else:
+                sql = ("SELECT period, log_date as 'log date', weekday, week, month, cur_streak as streak "
+                       "FROM habit_log_overview WHERE habit = " + "'" + str(name) +
+                       "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+
         elif period == 'yearly':
-            sql = ("SELECT period, log_date as 'log date', sum(completed) as completed, avg(quantity) as 'avg quantity',"
-                   "(avg(partial_completion)*100 ||'%') as 'avg completion (%)' "
-                   "FROM habit_log_overview WHERE name = " + "'" + str(name) +
-                   "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+            date_from = datetime.date.today() - datetime.timedelta(weeks=260)
+            is_quan = self.get_quan(name, date_from=date_from, date_to=datetime.date.today())
+            if is_quan:
+                sql = ("SELECT period, log_date as 'log date', sum(completed) as completed, "
+                       "avg(completed_quantity) as 'avg quantity',"
+                       "(avg(partial_completion)*100 ||'%') as 'avg completion (%)', cur_streak as streak "
+                       "FROM habit_log_overview WHERE habit = " + "'" + str(name) +
+                       "'" + " GROUP BY log_date ORDER by log_date desc LIMIT " + str(limit))
+            else:
+                sql = ("SELECT period, log_date as 'log date', cur_streak as streak FROM habit_log_overview "
+                       "WHERE habit = " + "'" + str(name) + "'" + " GROUP BY log_date ORDER by log_date desc LIMIT "
+                       + str(limit))
 
         db = sqlite3.connect(self.db_con)
         cursor = db.cursor()
 
-        # habit_log = cursor.execute(sql).fetchall()
-        # habit_log_df = pd.read_sql_query(sql, db_con)
         query = cursor.execute(sql)
         cols = [column[0] for column in query.description]
         habit_overview_df = pd.DataFrame.from_records(data=query.fetchall(), columns=cols)
 
         return habit_overview_df
+
+    def execute_analytics_sql(self, sql, list: bool, df: bool):
+        db = sqlite3.connect(self.db_con)
+        cursor = db.cursor()
+        if df:
+            query = cursor.execute(sql)
+            cols = [column[0] for column in query.description]
+            result_df = pd.DataFrame.from_records(data=query.fetchall(), columns=cols)
+            return result_df
+        elif list:
+            result_list = cursor.execute(sql).fetchall()
+            return result_list
+

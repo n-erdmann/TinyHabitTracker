@@ -312,7 +312,7 @@ class CreateDBObjects(unittest.TestCase):
         self.assertEqual('2024-03-24', str(active_streak_3k[5]), "Test failed for streak date for 'run3k'")
 
     def test_f_delete_habit(self):
-        print('test_f_delete_habit')
+        print('test_f_delete_habit')    # TODO: unquote after finished dev
         # self.dba.delete_from_db(name='run3k')
         # count rows with habit - must be 0 in each table
         # log_row_count = self.dba.get_row_count_by_habit('run3k', 'habit_log', 'id')
